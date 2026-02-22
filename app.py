@@ -1,13 +1,13 @@
 import os
-import json
 from datetime import datetime
 from flask import Flask, render_template_string
-from flask_sock import Sock
+from flask_socketio import SocketIO, emit
 
 app = Flask(__name__)
-sock = Sock(app)
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-key")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
-connected_clients = set()
+connected_users = {}
 
 HTML = """
 <!DOCTYPE html>
@@ -46,7 +46,7 @@ HTML = """
 </head>
 <body>
   <h1>WebSocket Chat</h1>
-  <p class="subtitle">Real-time messaging with Flask-Sock</p>
+  <p class="subtitle">Real-time messaging with Flask-SocketIO</p>
   <div class="container">
     <div class="status">
       <span class="dot off" id="dot"></span>
@@ -60,9 +60,10 @@ HTML = """
     </div>
     <div class="info">
       <h3>How it works</h3>
-      <p>This app uses <code>flask-sock</code> for WebSocket connections. Messages are broadcast to all connected clients in real time. The server tracks active connections and relays every message as JSON. Open multiple tabs to test it out!</p>
+      <p>This app uses <code>Flask-SocketIO</code> with <code>eventlet</code> for real-time WebSocket connections. Messages are broadcast to all connected clients instantly. Open multiple tabs to test it out!</p>
     </div>
   </div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
 <script>
   const chat = document.getElementById('chat');
   const msgInput = document.getElementById('msg');
@@ -70,41 +71,49 @@ HTML = """
   const dot = document.getElementById('dot');
   const statusText = document.getElementById('statusText');
   const clientsSpan = document.getElementById('clients');
-  let ws, username = 'User_' + Math.random().toString(36).slice(2, 6);
+  const username = 'User_' + Math.random().toString(36).slice(2, 6);
 
-  function connect() {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/ws`);
-    ws.onopen = () => {
-      dot.className = 'dot on'; statusText.textContent = 'Connected as ' + username;
-      msgInput.disabled = false; sendBtn.disabled = false; msgInput.focus();
-      ws.send(JSON.stringify({ type: 'join', user: username }));
-    };
-    ws.onmessage = (e) => {
-      const data = JSON.parse(e.data);
-      if (data.type === 'clients') { clientsSpan.textContent = data.count + ' online'; return; }
-      const div = document.createElement('div');
-      div.className = 'msg ' + (data.type === 'system' ? 'system' : data.user === username ? 'sent' : 'received');
-      if (data.type === 'system') { div.textContent = data.text; }
-      else { div.innerHTML = `<strong>${data.user}</strong> ${data.text}<div class="time">${data.time}</div>`; }
-      chat.appendChild(div); chat.scrollTop = chat.scrollHeight;
-    };
-    ws.onclose = () => {
-      dot.className = 'dot off'; statusText.textContent = 'Disconnected — reconnecting...';
-      msgInput.disabled = true; sendBtn.disabled = true;
-      setTimeout(connect, 2000);
-    };
-  }
+  const socket = io({ transports: ['websocket', 'polling'] });
+
+  socket.on('connect', () => {
+    dot.className = 'dot on';
+    statusText.textContent = 'Connected as ' + username;
+    msgInput.disabled = false; sendBtn.disabled = false; msgInput.focus();
+    socket.emit('join', { user: username });
+  });
+
+  socket.on('disconnect', () => {
+    dot.className = 'dot off';
+    statusText.textContent = 'Disconnected — reconnecting...';
+    msgInput.disabled = true; sendBtn.disabled = true;
+  });
+
+  socket.on('chat_message', (data) => {
+    const div = document.createElement('div');
+    div.className = 'msg ' + (data.user === username ? 'sent' : 'received');
+    div.innerHTML = '<strong>' + data.user + '</strong> ' + data.text + '<div class="time">' + data.time + '</div>';
+    chat.appendChild(div); chat.scrollTop = chat.scrollHeight;
+  });
+
+  socket.on('system_message', (data) => {
+    const div = document.createElement('div');
+    div.className = 'msg system';
+    div.textContent = data.text;
+    chat.appendChild(div); chat.scrollTop = chat.scrollHeight;
+  });
+
+  socket.on('client_count', (data) => {
+    clientsSpan.textContent = data.count + ' online';
+  });
 
   function sendMsg() {
     const text = msgInput.value.trim();
-    if (!text || !ws || ws.readyState !== 1) return;
-    ws.send(JSON.stringify({ type: 'message', user: username, text }));
+    if (!text) return;
+    socket.emit('chat_message', { user: username, text: text });
     msgInput.value = ''; msgInput.focus();
   }
 
   msgInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMsg(); });
-  connect();
 </script>
 </body>
 </html>
@@ -116,51 +125,28 @@ def index():
     return render_template_string(HTML)
 
 
-def broadcast(message):
-    dead = set()
-    data = json.dumps(message)
-    for client in connected_clients:
-        try:
-            client.send(data)
-        except Exception:
-            dead.add(client)
-    connected_clients -= dead
+@socketio.on("join")
+def handle_join(data):
+    connected_users[data["user"]] = True
+    emit("system_message", {"text": f"{data['user']} joined the chat"}, broadcast=True)
+    emit("client_count", {"count": len(connected_users)}, broadcast=True)
 
 
-def send_client_count():
-    broadcast({"type": "clients", "count": len(connected_clients)})
+@socketio.on("chat_message")
+def handle_message(data):
+    now = datetime.now().strftime("%H:%M")
+    emit("chat_message", {
+        "user": data["user"],
+        "text": data["text"],
+        "time": now,
+    }, broadcast=True)
 
 
-@sock.route("/ws")
-def websocket(ws):
-    connected_clients.add(ws)
-    send_client_count()
-    try:
-        while True:
-            raw = ws.receive()
-            if raw is None:
-                break
-            data = json.loads(raw)
-            now = datetime.now().strftime("%H:%M")
-
-            if data.get("type") == "join":
-                broadcast({"type": "system", "text": f"{data['user']} joined the chat"})
-                send_client_count()
-
-            elif data.get("type") == "message":
-                broadcast({
-                    "type": "message",
-                    "user": data["user"],
-                    "text": data["text"],
-                    "time": now,
-                })
-    except Exception:
-        pass
-    finally:
-        connected_clients.discard(ws)
-        send_client_count()
+@socketio.on("disconnect")
+def handle_disconnect():
+    emit("client_count", {"count": max(0, len(connected_users) - 1)}, broadcast=True)
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    socketio.run(app, host="0.0.0.0", port=port)
