@@ -9,10 +9,6 @@ flask-sock
 gunicorn
 ```
 
-## Deployment
+## One-click Deployment
 
-Railway deploy note: For your Procfile (or Railway start command), use:
-
-```
-gunicorn --worker-class=gevent app:app
-```
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/flask-websocket-chat?referralCode=-Xd4K_&utm_medium=integration&utm_source=template&utm_campaign=generic)
