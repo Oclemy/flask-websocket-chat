@@ -9,6 +9,9 @@ flask
 flask-sock
 gunicorn
 ```
+## Edit Project
+
+[![Edit on Codely](https://python.codely.run/static/buttons/browse-minimal.svg)](https://python.codely.run/project/flask-websocket-chat)
 
 ## Run
 
