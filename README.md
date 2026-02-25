@@ -15,7 +15,7 @@ To view demo of the project:
 
 ### Run
 
-[![Run on Codely](https://codely.run/python/static/buttons/run-minimal.svg)](https://codely.run/project/python/flask-websocket-chat)
+[![Run on Codely](https://codely.run/python/static/buttons/run-minimal.svg)](https://codely.run/python/project/flask-websocket-chat)
 
 ### Edit Project
 
