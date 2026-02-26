@@ -21,6 +21,10 @@ To view demo of the project:
 
 [![Edit on Codely](https://codely.run/python/static/buttons/browse-minimal.svg)](https://codely.run/python/projects/flask-websocket-chat)
 
+### Video
+
+[![Watch Video](https://codely.run/python/static/buttons/watch-minimal.svg)](https://youtu.be/38FnHAYJGCk)
+
 
 
 ### One-click Deployment (1 month FREE)
